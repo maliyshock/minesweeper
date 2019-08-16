@@ -1,4 +1,6 @@
-import React, {Component, MouseEvent} from 'react';
+import React, {MouseEvent} from 'react';
+
+import { decimalAdjust } from './../helper';
 
 export interface cellState {
     highlited: boolean
@@ -10,9 +12,9 @@ export interface cellProps {
     itemKey: number,
     row: string,
     rowKey: number,
-    suspiciousnessLevel: {
-        [key: string]: {value:number, counter:number}
-    },
+    suspiciousnessLevel: { x: number, y: number, value: number, counter: number } | undefined,
+    isMine: boolean,
+    isSafe: boolean,
 }
 
 class Cell extends React.Component<cellProps, cellState> {
@@ -41,21 +43,20 @@ class Cell extends React.Component<cellProps, cellState> {
         switch (string) {
             case '□':
                 return 'gray';
-                break;
+
             case '0':
                 return 'gray';
-                break;
+
             case '1':
                 return 'blue';
-                break;
+
             case '2':
                 return 'green';
-                break;
+
             case '3':
                 return 'red';
-                break;
-            default:
 
+            default:
                 break;
         }
     }
@@ -65,25 +66,30 @@ class Cell extends React.Component<cellProps, cellState> {
     }
 
     render() {
-        let suspiciousnessLevel:number|string;
-        let counter = 0;
+        let suspiciousnessLevel: number ;
+        let counter: number = 0;
         let item = this.props.item;
-        let row = this.props.row;
         let itemKey = this.props.itemKey;
         let rowKey = this.props.rowKey;
         let buttonModifier = (item !== '□') ? `button--bg-gray button--color-${this.getColor(item)}`: '';
-
         let title = (item === '□' || item === '0') ?  '' : item;
+        let hint: string;
 
-        if( this.props.suspiciousnessLevel[`x${itemKey}y${rowKey}`] === undefined ) {
-            suspiciousnessLevel = '?';
+        if( this.props.suspiciousnessLevel !== undefined ) {
+            counter = this.props.suspiciousnessLevel.counter;
+            suspiciousnessLevel = this.props.suspiciousnessLevel.value;
+
+            hint = (item === '□') ? `${ decimalAdjust('round', suspiciousnessLevel * 100, -2 )}% \n(${counter})` : '';
+
         } else {
-            counter = this.props.suspiciousnessLevel[`x${itemKey}y${rowKey}`]['counter'];
-            suspiciousnessLevel = this.props.suspiciousnessLevel[`x${itemKey}y${rowKey}`]['value'];
+            hint = ''
+        }
 
-            if(Math.floor(suspiciousnessLevel) > 85) {
-                buttonModifier += ' mine';
-            }
+        if( this.props.isMine) {
+            buttonModifier += ' mine';
+        }
+        if( this.props.isSafe) {
+            buttonModifier += ' safe';
         }
 
         if(this.state.highlited) {
@@ -95,7 +101,7 @@ class Cell extends React.Component<cellProps, cellState> {
                    onClick={() => this.cellHandler(this.props.socket, rowKey, itemKey)}
                    key={itemKey}>
             <button title={title} className={`map__button button ${buttonModifier}`}>{ (item === '□') ? '' : item}</button>
-            <div className={`map__cell-hint map__cell-hint--${counter}`}>{ (item === '□') ? suspiciousnessLevel +'%'+'\n(' + counter + ')' : ''}</div>
+            <div className={`map__cell-hint map__cell-hint--${counter}`}>{hint}</div>
         </li>
     }
 }
