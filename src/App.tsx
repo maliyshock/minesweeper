@@ -5,7 +5,8 @@ import _ from 'lodash';
 import update from 'immutability-helper';
 
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y } from './constants';
-import { decimalAdjust } from './helper';
+import { round, convertToAbsolute, generateChunks, hasNumber, parseData, removeProp, extractNumberFromString, getTheAbsoluteStuff } from './helper';
+import { chunks, chunk, neighbor } from './interfaces/interfaces';
 
 export interface gameState {
     socket: WebSocket,
@@ -20,22 +21,14 @@ export interface gameState {
     yChunkNumber: number,
     currentXStartPoint: number,
     currentYStartPoint: number,
+    endOfMapIsReached: boolean,
 
     currentChunkIs: string[],
-    chunks: {
-        [key: string]: {
-            suspiciousnessLevel: {
-                [key: string]: { x: number, y: number, value: number, counter: number }
-            }
-        }
-    }
-    chunkEndIsReached: boolean,
+    chunks: chunks,
 
-    notShureChunks: {
-        [key: string]: {
-            [key: string]: { x: number, y: number }
-        }
-    }
+    playing: boolean,
+
+    decisionMade: boolean,
 
     mines: { [key: string]: { x: number, y: number } },
     safe: { [key: string]: { x: number, y: number } },
@@ -43,18 +36,11 @@ export interface gameState {
     operationStatus: string | undefined,
     hintsAreHidden: boolean,
     title: string,
-    playing: boolean,
 
     level: number,
     lose: number,
     win: number,
     winRate: number | undefined
-}
-
-export interface neighbor {
-    x: number,
-    y: number,
-    value: string
 };
 
 let initialState = {
@@ -70,20 +56,24 @@ let initialState = {
     yChunkNumber: 0,
     currentXStartPoint: 0,
     currentYStartPoint: 0,
-    chunkEndIsReached: false,
+    endOfMapIsReached: false,
 
     currentChunkIs: [],
     chunks: {},
     mines: {},
     safe: {},
+
+    playing: true,
+
+    decisionMade: false,
+
     notShureChunks: {},
 
     operationStatus: undefined,
     hintsAreHidden: true,
     title: 'Lets Rock',
-    playing: true,
 
-    level: 2,
+    level: 3,
     lose: 0,
     win: 0,
     winRate: undefined
@@ -103,36 +93,6 @@ class App extends React.Component<{}, gameState> {
         // on connection send comand to begin game
     }
 
-    parseData(e: MessageEvent) {
-        let data: string = e.data;
-        let splitedData: string[] = _.split(data, '\n');
-        let operationStatus: string = splitedData[0];
-        let map: string[] = [];
-        let rows: number = 0;
-        let cols: number = 0;
-
-        if (splitedData.length > 1) {
-            map = _.slice(splitedData, 1, splitedData.length - 1);
-            rows = map.length;
-            cols = map[0].length;
-        }
-
-        return {map, operationStatus, rows, cols};
-    }
-
-    hasNumber(myString: string) {
-        return /^(?=.*\d)(?=.*[1-9]).{1,10}$/.test(myString);
-    }
-
-    convertToAbsolute(value: number, chunkMultiplier: number, size: number) {
-        return value + ( chunkMultiplier * size );
-    }
-
-    removeProp(name: string, objectArg: { [key: string]: { x: number, y: number } } ) {
-        const { [name]: val, ...remaning } = objectArg;
-        return remaning;
-    }
-
     startButtonHandler(socket: WebSocket) {
         socket.send(`new ${this.state.level}`);
     }
@@ -142,27 +102,28 @@ class App extends React.Component<{}, gameState> {
     }
 
     // loop through the list of neighbor coordinates and do callback function
-    loopThroughNeighbors(data: {
+    loopThroughNeighbors( data: {
         neighborsArray: neighbor[],
         value: number,
         emptyCellsCounter: number,
         minesAround: number
-    }, callback: (coordinate: string, x: number, y: number, value: number, emptyCellsCounter: number, minesAround: number) => boolean) {
-        let result = true;
+    }, callback: ( x: number, y: number, chunk: chunk, value: number, emptyCellsCounter: number, minesAround: number ) => boolean ) {
+        let result:boolean[] = [];
         for (let i = 0; i < data.neighborsArray.length; i++) {
             // get the coords from the iterated object
             let x: number = data.neighborsArray[i]['x'];
             let y: number = data.neighborsArray[i]['y'];
+            let chunk = data.neighborsArray[i].chunk;
 
-            let itemCoordinates: string = `x${x}y${y}`;
-
-            if ( !callback( itemCoordinates, x, y, data.value, data.emptyCellsCounter, data.minesAround ) ) {
-                result = false;
-                break;
-            }
+            // in case callback returns false break the cycle
+            // not the break cycle if we do not have any new information
+            // or we making analysis
+            // new information will be mine or safe point not in the array of mines or safe points
+            result.push( callback( x, y, chunk, data.value, data.emptyCellsCounter, data.minesAround ) );
         }
 
-        return result;
+        // can we continue the loop above or not
+        return !result.some( item => item === false);
     }
 
     // checks if current chunk in state has numbers inside
@@ -172,67 +133,222 @@ class App extends React.Component<{}, gameState> {
         let length = this.state.currentChunkIs.length;
 
         for (let i = 0; i < length; i++) {
-            if ( this.hasNumber( this.state.currentChunkIs[i] ) ) {
+            if ( hasNumber( this.state.currentChunkIs[i] ) ) {
                 return i;
             }
         }
         return false
     }
 
-    makeNewChunk() {
-        // where to start
-        if (this.state.map !== undefined) {
-            // convert from human readability to computer orders
-            let initialRow = this.convertToAbsolute(this.state.currentYStartPoint, this.state.yChunkNumber, CHUNK_SIZE_Y);
-            let column = this.convertToAbsolute(this.state.currentXStartPoint, this.state.xChunkNumber, CHUNK_SIZE_X);
-            let newChunk: string[] = [];
-            let iteratableRow: number = initialRow;
-
-            // from current position to maximum chunk size of rows
-            for (initialRow; iteratableRow < (initialRow + CHUNK_SIZE_Y); iteratableRow++) {
-                newChunk.push(this.state.map[iteratableRow].slice(column, (column + CHUNK_SIZE_Y)));
-            }
-
-            this.setState({ currentChunkIs: newChunk });
-        }
-        return false
+    errasePredictions(currentChunkRow: string, currentChunkCol: string) {
+        this.setState(prevState => {
+            return update(prevState, {
+                chunks: {
+                    [currentChunkRow]: {
+                        [currentChunkCol]: {
+                            suspiciousnessLevel: { $set: {} }
+                        }
+                    }
+                }
+            })
+        });
     }
 
-    areThereNeighbor(row: number, col: number) {
-        if (this.state.map !== undefined) {
-            if (this.state.map[row] !== undefined) {
-                return {x: col, y: row, value: this.state.map[row][col]};
-            }
-            return undefined
+    /* TODO:
+     * how to avoid unnecessary parameters?
+     */
+    setMine( x: number, y: number, chunk: chunk,  value?: number, emptyCellsCounter?: number, minesAround?: number) {
+        let row = chunk.rowName;
+        let col = chunk.colName;
+
+        let { a_x, a_y, absCoordinates } = getTheAbsoluteStuff(x, y, extractNumberFromString(col), extractNumberFromString(row) );
+
+        if( !(absCoordinates in this.state.mines) ) {
+            let newState = update (
+                this.state, {
+                    mines: {
+                        [absCoordinates]: { $set: { x: a_x, y: a_y } }
+                    },
+                    endOfMapIsReached: { $set: false}
+                });
+
+            this.setState(newState);
+
+            return false;
+        } else {
+            return true;
         }
     }
 
-    whatDoWeHaveHere(col: number, row: number) {
+    setSafe( x: number, y: number, chunk: chunk,  value?: number, emptyCellsCounter?: number, minesAround?: number) {
+        let row = chunk.rowName;
+        let col = chunk.colName;
+
+        let { a_x, a_y, absCoordinates } = getTheAbsoluteStuff(x, y, extractNumberFromString(col), extractNumberFromString(row) );
+
+        if ( this.state.mines !== undefined && !( absCoordinates in this.state.mines ) ) {
+            // update safe cells
+            let newState = update (
+                this.state, {
+                    safe: {
+                        [absCoordinates]: { $set: { x: a_x, y: a_y } }
+                    },
+                    endOfMapIsReached: { $set: false}
+                });
+
+            this.setState(newState);
+
+            return false;
+        } else {
+            return true
+        }
+    }
+
+    setSuspiciousness(row: string, col: string, coordinates: string, newValue: number, counter: number, x: number, y: number ) {
+        this.setState(prevState => {
+            return update(prevState, {
+                chunks: {
+                    [row]: {
+                        [col]: {
+                            suspiciousnessLevel: {
+                                [coordinates]: {
+                                    $set: { value: newValue, counter, x: x, y: y }
+                                }
+                            }
+                        }
+                    }
+                }
+            })
+        });
+    }
+
+    analyzeOfNeighbors( x: number, y: number, chunk: chunk, value: number, emptyCellsCounter: number, minesAround: number ) {
+        let row = chunk.rowName;
+        let col = chunk.colName;
+
+        // make prediction for all near empty cells
+        let prediction: number = value / (emptyCellsCounter - minesAround) ;
+        let newValue: number;
+        let counter: number; // amount of intersections
+        let coordinates = `x${x}y${y}`;
+
+        // in case of having the different chunk, we can recalculate current yChunkNumber and xChunkNumber
+        let { absCoordinates } = getTheAbsoluteStuff(x, y, extractNumberFromString(col), extractNumberFromString(row) );
+
+        let suspiciousnessOfItem = ( this.state.chunks[row][col] !== undefined ) ? this.state.chunks[row][col].suspiciousnessLevel[coordinates] : undefined;
+
+        if( !(absCoordinates in this.state.mines) ) {
+                // if prediction level of coordinates exist
+            if (suspiciousnessOfItem !== undefined) {
+                newValue =  round((suspiciousnessOfItem['value'] + prediction)/2, -2) ;
+                // newValue =  round( 1 - (1 - suspiciousnessOfItem['value']) * (1 - prediction ), -2 );
+                counter = suspiciousnessOfItem['counter'] + 1 ;
+            } else {
+                newValue = round( prediction, -2);
+                counter = 1;
+            }
+
+            this.setSuspiciousness(row, col, coordinates, newValue, counter, x, y)
+        }
+        return true;
+    }
+
+    areThereNeighbor(x: number, y: number) {
+        let rowIdentifier = this.state.yChunkNumber;
+        let colIdentifier = this.state.xChunkNumber;
+        let colName = 'col_';
+        let rowName = 'row_';
+        let newY = y;
+        let newX = x;
+
+        // check if this coordinates of current chunk
+        if ( this.state.currentChunkIs[y] !== undefined && this.state.currentChunkIs[y][x] !== undefined ) {
+            rowName += `${this.state.yChunkNumber}`;
+            colName += `${this.state.xChunkNumber}`;
+
+            return {
+                x: x,
+                y: y,
+                value: this.state.currentChunkIs[y][x],
+                chunk: {
+                    rowName: rowName,
+                    colName: colName
+                }
+            };
+        } else {
+            // if not, check what chunk belong those coordinates
+            // convert coordinates and set new col and row names according to new chunk
+
+            if( y >= CHUNK_SIZE_Y) {
+                rowIdentifier = rowIdentifier + 1;
+                newY = y - CHUNK_SIZE_Y;
+            } else if (y < 0) {
+                rowIdentifier = rowIdentifier - 1;
+                newY = y + CHUNK_SIZE_Y;
+            }
+
+            rowName += `${rowIdentifier}`;
+
+            if( !(rowName in this.state.chunks) ) {
+                return undefined;
+            }
+
+            if( x >= CHUNK_SIZE_X) {
+                colIdentifier = colIdentifier + 1;
+                newX = x - CHUNK_SIZE_X;
+            } else if (x < 0) {
+                colIdentifier = colIdentifier - 1;
+                newX = x + CHUNK_SIZE_X;
+            }
+            colName += `${colIdentifier}`;
+
+
+            if( !(colName in this.state.chunks[rowName]) ) {
+                return undefined;
+            }
+
+            let theChunk = this.state.chunks[rowName][colName].map;
+            return {
+                x: newX,
+                y: newY,
+                value: theChunk[newY][newX],
+                chunk: {
+                    rowName: rowName,
+                    colName: colName
+                }
+            };
+        }
+    }
+
+    // relative coordinates to current chunk is
+    whatDoWeHaveHere(x: number, y: number) {
         let emptyCellsCounter: number = 0;
         let neighborsArray = [];
         let minesAround = 0;
 
         // list of poteintial cells around
         let coordinatesToCheck = [
-            {x: col - 1, y: row - 1},
-            {x: col, y: row - 1},
-            {x: col + 1, y: row - 1},
-            {x: col - 1, y: row},
-            {x: col + 1, y: row},
-            {x: col - 1, y: row + 1},
-            {x: col, y: row + 1},
-            {x: col + 1, y: row + 1},
+            { x: x - 1, y: y - 1 },
+            { x: x,     y: y - 1 },
+            { x: x + 1, y: y - 1 },
+            { x: x - 1, y: y },
+            { x: x + 1, y: y },
+            { x: x - 1, y: y + 1 },
+            { x: x,     y: y + 1 },
+            { x: x + 1, y: y + 1 },
         ];
 
         for (let i = 0; i < coordinatesToCheck.length; i++) {
             // go through list and check if cell exist on the map
             // if it is, save it coords and value to the variable
-            let neighbor: neighbor | undefined = this.areThereNeighbor(coordinatesToCheck[i]['y'], coordinatesToCheck[i]['x']);
-
+            let neighbor: neighbor | undefined = this.areThereNeighbor(coordinatesToCheck[i]['x'], coordinatesToCheck[i]['y']);
             // if this neighbor exist on the map
             if ( neighbor !== undefined && neighbor.value === '□' ) {
+                // @ts-ignore
+                let { absCoordinates } = getTheAbsoluteStuff(neighbor.x, neighbor.y, extractNumberFromString(neighbor.chunk.colName), extractNumberFromString(neighbor.chunk.rowName) )
+
                 // do we have mines around this area
-                if (`x${neighbor.x}y${neighbor.y}` in this.state.mines) {
+                if (absCoordinates in this.state.mines) {
                     minesAround++;
                 }
                 emptyCellsCounter++;
@@ -240,129 +356,13 @@ class App extends React.Component<{}, gameState> {
             }
         }
 
-        return {minesAround, emptyCellsCounter, neighborsArray}
+        return { minesAround, emptyCellsCounter, neighborsArray }
     }
 
-    compareCoordinatesWithCurrentChunk(x: number, y: number ) {
-        let r = this.state.xChunkNumber;
-        let c = this.state.yChunkNumber;
-
-        if( x > (this.state.xChunkNumber * CHUNK_SIZE_X + CHUNK_SIZE_X) ) {
-            c = c + 1;
-        } else if (x < this.state.xChunkNumber * CHUNK_SIZE_X ) {
-            c = c - 1;
-        }
-
-        if( y > (this.state.yChunkNumber * CHUNK_SIZE_Y + CHUNK_SIZE_Y) ) {
-            r = r + 1;
-        } else if (x < this.state.yChunkNumber * CHUNK_SIZE_Y ) {
-            r = r - 1;
-        }
-
-        return `chunk_r${r}_c${c}`;
-    }
-
-    setMine( coordinates: string, x: number, y: number,  value?: number, emptyCellsCounter?: number, minesAround?: number) {
-        // does this item belongs to this chunk or another
-        let checkedChunkName = this.compareCoordinatesWithCurrentChunk( x, y );
-        let suspiciousnessLevelObject = ( this.state.chunks[checkedChunkName] !== undefined ) ? this.state.chunks[checkedChunkName].suspiciousnessLevel : undefined;
-
-        if (suspiciousnessLevelObject !== undefined && coordinates in suspiciousnessLevelObject) {
-            let updatedSuspiciousness = this.removeProp(coordinates, suspiciousnessLevelObject);
-
-            // remove prediction, because it is mine
-            let newState = update (
-                this.state, {
-                    chunks: {
-                        [checkedChunkName]: {
-                            suspiciousnessLevel: { $set: updatedSuspiciousness }
-                        }
-                    }
-                });
-
-            this.setState(newState);
-        }
-
-        if( !(coordinates in this.state.mines) ) {
-            let newState = update (
-                this.state, {
-                    mines: {
-                        [coordinates]: { $set: { x: x, y: y } }
-                    }
-                });
-
-            this.setState(newState);
-
-            return false;
-
-        } else {
-            return true
-        }
-    }
-
-    setSafe( coordinates: string, x: number, y: number,  value?: number, emptyCellsCounter?: number, minesAround?: number) {
-        if ( this.state.mines!== undefined && !( coordinates in this.state.mines ) ) {
-            // update safe cells
-            let newState = update (
-                this.state, {
-                    safe: {
-                        [coordinates]: { $set: { x: x, y: y } }
-                    }
-                });
-
-            this.setState(newState);
-
-            return false;
-
-        } else {
-            return true
-        }
-
-    }
-
-    analyzeOfNeighbors( coordinates: string, x: number, y: number, value: number, emptyCellsCounter: number, minesAround: number ) {
-        let result = true;
-
-        // does this item belongs to this chunk or another
-        let checkedChunkName = this.compareCoordinatesWithCurrentChunk( x, y );
-
-        // make prediction for all near empty cells
-        let prediction: number = value / (emptyCellsCounter - minesAround) ;
-        let newValue: number;
-        let counter: number; // amount of intersections
-        let suspiciousnessOfItem = ( this.state.chunks[checkedChunkName] !== undefined ) ? this.state.chunks[checkedChunkName].suspiciousnessLevel[coordinates] : undefined;
-
-        // if prediction level of coordinates exist
-        if (suspiciousnessOfItem !== undefined) {
-            newValue =  decimalAdjust('round', 1 - (1 - suspiciousnessOfItem['value']) * (1 - prediction ), -2 );
-            counter = suspiciousnessOfItem['counter'] + 1 ;
-        } else {
-            newValue = decimalAdjust('round', prediction, -2);
-            counter = 1;
-        }
-
-        this.setState(prevState => {
-            return update(prevState, {
-                chunks: {
-                    [checkedChunkName]: {
-                        suspiciousnessLevel: {
-                            [coordinates]: {
-                                $set: { value: newValue, counter, x: x, y: y }
-                            }
-                        }
-                    }
-                }
-            })
-        });
-        result = true;
-
-        return result;
-    }
-
-    makePrediction(row: number, col: number, value: number): boolean {
+    makePrediction(y: number, x: number, value: number): boolean {
         let result = true;
         if (this.state.map !== undefined) {
-            let { minesAround, emptyCellsCounter, neighborsArray } = this.whatDoWeHaveHere(col, row);
+            let { minesAround, emptyCellsCounter, neighborsArray } = this.whatDoWeHaveHere(x, y);
 
             // if there are neighbors
             if (neighborsArray.length > 0 && neighborsArray.length > minesAround) {
@@ -376,7 +376,6 @@ class App extends React.Component<{}, gameState> {
                     // in case if we know how many mines around and the amount of empty cells more than mines around number
                     // safe cells = neighbors - mines
                     result = this.loopThroughNeighbors( { neighborsArray, value, emptyCellsCounter, minesAround}, this.setSafe.bind(this) );
-
                 } else {
                     // in case we do not have information about mines around make some hypothesis and predictions
                     // save prediction level for accessible neighbors
@@ -400,8 +399,8 @@ class App extends React.Component<{}, gameState> {
             let y = firstSaved.y;
 
             // remove it from the state
-            let updatedSafe = this.removeProp(firstKey, this.state.safe);
-            this.setState({safe: updatedSafe, playing: false});
+            let updatedSafe = removeProp(firstKey, this.state.safe);
+            this.setState({safe: updatedSafe});
 
             // open coords
             this.state.socket.send(`open ${x} ${y}`);
@@ -413,23 +412,27 @@ class App extends React.Component<{}, gameState> {
 
     goToTheNextChunk() {
         // go to the next chunk if it is possible
-        if( this.state.yChunkNumber < this.state.yChunksAmount ) {
-            this.setState( {yChunkNumber: this.state.yChunkNumber + 1} )
+        if( this.state.xChunkNumber < this.state.xChunksAmount ) {
+            this.setState( {
+                xChunkNumber: this.state.xChunkNumber + 1,
+                currentChunkIs: this.state.chunks[`row_${this.state.yChunkNumber}`][`col_${this.state.xChunkNumber + 1}`].map
+            })
         }
-        else if ( this.state.xChunkNumber < this.state.xChunksAmount ) {
-            this.setState( {xChunkNumber: this.state.xChunkNumber + 1, yChunkNumber: 0} )
-        }
-        else {
-            console.log('here i should go an chek if there any notShureChunks left');
+        else if ( this.state.yChunkNumber < this.state.yChunksAmount ) {
+            this.setState( {
+                yChunkNumber: this.state.yChunkNumber + 1,
+                xChunkNumber: 0,
+                currentChunkIs: this.state.chunks[`row_${this.state.yChunkNumber + 1}`][`col_0`].map
+            })
         }
     }
 
     // picked smallest avaliable prediction to send
-    makeDecision(chunkName:string) {
+    makeDecision(currentChunkRow: string, currentChunkCol: string):boolean {
         let smallestPredictionCoords: { value: number, counter: number, x: number, y: number } | undefined;
         // if there are some suspiciousness cells
-        if (!_.isEmpty( this.state.chunks[chunkName].suspiciousnessLevel) ) {
-            _.forOwn(this.state.chunks[chunkName].suspiciousnessLevel, (value, key) => {
+        if (!_.isEmpty( this.state.chunks[currentChunkRow][currentChunkCol].suspiciousnessLevel) ) {
+            _.forOwn(this.state.chunks[currentChunkRow][currentChunkCol].suspiciousnessLevel, (value, key) => {
                 // if there is no saved smallestPredictionCoords
                 if (smallestPredictionCoords === undefined ||
                     ( ( value.value <= smallestPredictionCoords.value ) && !(`x${value.x}y${value.y}` in this.state.mines )) ) {
@@ -440,41 +443,25 @@ class App extends React.Component<{}, gameState> {
 
             // pick up samllest decision
             if ( smallestPredictionCoords !== undefined &&
+                // smallestPredictionCoords.value < 100 &&
                     !( `x${smallestPredictionCoords.x}y${smallestPredictionCoords.y}` in this.state.mines )
                 ) {
 
-                this.state.socket.send(`open ${smallestPredictionCoords.x} ${smallestPredictionCoords.y}`);
-                this.setState({ playing: false });
+                let a_x = convertToAbsolute(smallestPredictionCoords.x, this.state.xChunkNumber, CHUNK_SIZE_X);
+                let a_y = convertToAbsolute(smallestPredictionCoords.y, this.state.yChunkNumber, CHUNK_SIZE_Y);
+
+                // errase previous predictions for this chunk
+                this.errasePredictions(currentChunkRow, currentChunkCol);
+
+                this.state.socket.send(`open ${a_x} ${a_y}`);
+                return true;
             }
             // there is no predictions save coordinates of this one item, and go to the next chunk
             else {
-                // should i double check my currentChunkIs ???
-                for (let y = 0; y < this.state.currentChunkIs.length; y++) {
-                    for (let x = 0; x < this.state.currentChunkIs[y].length; x++) {
-                        let item = this.state.currentChunkIs[y][x];
-                        if (item === '□') {
-                            let a_x = this.convertToAbsolute(x, this.state.xChunkNumber, CHUNK_SIZE_X);
-                            let a_y = this.convertToAbsolute(y, this.state.yChunkNumber, CHUNK_SIZE_Y);
-
-                            if( !(`x${a_x}y${a_y}` in this.state.mines) ) {
-                                this.setState(prevState => {
-                                    return update(prevState, {
-                                        notShureChunks: {
-                                            [chunkName]: {
-                                                $set: {
-                                                    [`x${a_x}y${a_y}`]: { x: a_x, y: a_y }
-                                                }
-                                            }
-                                        }
-                                    });
-                                })
-                            }
-                        }
-                    }
-                }
-
-                this.goToTheNextChunk();
+                return false;
             }
+        } else {
+            return false;
         }
     }
 
@@ -493,7 +480,8 @@ class App extends React.Component<{}, gameState> {
 
         this.state.socket.onmessage = (e: MessageEvent) => {
             // each time as we got message we save the new data
-            let {map, operationStatus, cols, rows} = this.parseData(e);
+            let {map, operationStatus, cols, rows} = parseData(e);
+
             console.log(e.data);
             // update the state with new data
             this.setState({
@@ -503,100 +491,105 @@ class App extends React.Component<{}, gameState> {
                 rows: rows,
                 cells: cols * rows,
 
+                decisionMade: false,
+
                 xChunksAmount: ( cols / CHUNK_SIZE_X ) - 1,
-                yChunksAmount: ( rows / CHUNK_SIZE_Y ) - 1,
+                yChunksAmount: ( rows / CHUNK_SIZE_Y ) - 1
             });
 
             // if map exist and we are ready to play
-            if (this.state.map !== undefined && this.state.map.length > 0 && this.state.playing) {
-                this.makeNewChunk();
+            if (map !== undefined && map.length > 0 && operationStatus !== 'open: You lose' && operationStatus !== 'open: You win' && this.state.playing) {
+                let newChunks = generateChunks( map );
+                let currentChunkRow = `row_${this.state.yChunkNumber}`;
+                let currentChunkCol = `col_${this.state.xChunkNumber}`;
 
-                let r = this.state.xChunkNumber;
-                let c = this.state.yChunkNumber;
-                let chunkName = `chunk_r${r}_c${c}`;
-                let predictionResult: boolean | undefined;
+                this.setState({
+                    chunks: newChunks ,
+                    currentChunkIs: newChunks[currentChunkRow][currentChunkCol].map
+                });
+
+                let predictionResult = true;
+                let emptyRows = 0;
+                let emptyCells = 0;
 
                 // returns row number of current chunk if the row has numbers inside
                 let rowPosition = this.isChunkHasNumbers();
 
+
                 // if we have any 100% safety cells - open oen
                 if (!_.isEmpty(this.state.safe)) {
                     this.openSafeCell();
-                }
-                // if we have row with number
-                else if (rowPosition !== false) {
-
-                    // errase previous predictions for this chunk
-                    this.setState({
-                        chunks: {
-                            [chunkName]: { suspiciousnessLevel: {} }
-                        },
-                        chunkEndIsReached: false
-                    });
-
-                    // loop through piece(chunk) copied and saved to the state from the global map
-                    loop1:
-                    for (let y: number = rowPosition; y < this.state.currentChunkIs.length; y++) {
-                        // row position is start point, but we could have empty rows after
-                        if ( this.hasNumber( this.state.currentChunkIs[y] ) ) {
-                            for (let x = 0; x < this.state.currentChunkIs[y].length; x++) {
-                                // does it have any numbers inside
-
-                                let a_x = this.convertToAbsolute(x, this.state.xChunkNumber, CHUNK_SIZE_X);
-                                let a_y = this.convertToAbsolute(y, this.state.yChunkNumber, CHUNK_SIZE_Y);
-
-                                let item = this.state.map[a_y][a_x];
-                                // if this is a number with value > 0
-                                if (item !== '□' && ( _.parseInt(item) > 0 )) {
-                                    predictionResult = this.makePrediction(y, x, _.parseInt(item));
-
-                                    if(predictionResult === false) {
-                                        //  break the current cycle
-                                        break loop1;
-                                    }
-                                }
-
-                                if( (x === this.state.currentChunkIs[y].length - 1) && (y === this.state.currentChunkIs.length - 1 ) ) {
-                                    this.setState({chunkEndIsReached: true});
-                                }
-                            }
-                        }
-
-                        if( (y === this.state.currentChunkIs.length - 1 ) ) {
-                            this.setState({chunkEndIsReached: true});
-                        }
-                    }
-
-                    if( predictionResult !== false && this.state.chunkEndIsReached ) {
-                        this.makeDecision(chunkName);
-                    } else {
-                        this.state.socket.send('map')
-                    }
-
-                    // what if all chunks are empty?
-                    // try to get some luck
-
                 } else {
-                    // if it is new chunk and we did not found any numbers
-                    // but we have some predictions
-                    if (this.state.chunks[chunkName] !== undefined) {
-                        // check if it has predictions comed from other chunk or not, if smaller than 40% then send
-                        _.forOwn(this.state.chunks[chunkName].suspiciousnessLevel, (value, key) => {
-                            if (value.value < 40) {
-                                this.state.socket.send(`open ${value.x} ${value.y}`);
-                            } else {
-                                this.goToTheNextChunk();
+                    // if we have row with number
+                    if (rowPosition !== false) {
+                        // loop through piece(chunk) copied and saved to the state from the global map
+                        loop1:
+                            for (let y: number = rowPosition; y < this.state.currentChunkIs.length; y++) {
+                                // row position is start point, but we could have empty rows after
+                                if ( hasNumber( this.state.currentChunkIs[y] ) ) {
+                                    for (let x = 0; x < this.state.currentChunkIs[y].length; x++) {
+                                        // does it have any numbers inside
 
-                                // what if all chunks are empty?
-                                // try to get some luck
+                                        let a_x = convertToAbsolute(x, this.state.xChunkNumber, CHUNK_SIZE_X);
+                                        let a_y = convertToAbsolute(y, this.state.yChunkNumber, CHUNK_SIZE_Y);
+
+                                        let item = map[a_y][a_x];
+                                        // if this is a number with value > 0
+                                        if (item !== '□' && ( _.parseInt(item) > 0 ) ) {
+                                            //returns false, when set mine or safe cells
+                                            predictionResult = this.makePrediction(y, x, _.parseInt(item));
+
+                                            // if we found mine or safe cells we will get false,
+                                            if( predictionResult === false ) {
+
+                                                // errase previous predictions for this chunk
+                                                this.errasePredictions(currentChunkRow, currentChunkCol);
+                                                //  break the current cycle
+                                                break loop1;
+                                            }
+                                        } else if( item === '□' ) {
+                                            if( !(`x${a_x}y${a_y}` in this.state.mines) ) {
+                                                emptyCells++
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    emptyRows++;
+                                }
                             }
-                        });
                     }
-                    // in case of the beggining
-                    else if ( this.state.xChunkNumber === 0 && this.state.yChunkNumber === 0 ) {
-                        this.state.socket.send('open 0 0');
+
+                    if( predictionResult ) {
+                        // if we reached the end of the map and we do not have any choice except to make decisions
+                        if( this.state.xChunksAmount === this.state.xChunkNumber && this.state.yChunksAmount === this.state.yChunkNumber && !this.state.endOfMapIsReached) {
+                            this.setState( {  xChunkNumber: 0, yChunkNumber: 0, endOfMapIsReached: true } );
+                        }
+                        // if there are some empty avaliable to choose cells - try to make decision
+                        else if( (emptyCells > 0 || emptyRows > 0) && this.state.endOfMapIsReached) {
+                            // if there no any avaliable predictions < 100 we can not make decision
+
+                            this.makeDecision(currentChunkRow, currentChunkCol);
+                            this.setState( { endOfMapIsReached: false, decisionMade: true } );
+                        } else {
+                            this.goToTheNextChunk();
+                        }
+                    }
+
+                    if( !this.state.decisionMade ) {
+                        this.state.socket.send('map');
                     }
                 }
+
+
+            } else if(map !== undefined && map.length > 0) {
+                let newChunks = generateChunks( map );
+                let currentChunkRow = `row_${this.state.yChunkNumber}`;
+                let currentChunkCol = `col_${this.state.xChunkNumber}`;
+
+                this.setState({
+                    chunks: newChunks ,
+                    currentChunkIs: newChunks[currentChunkRow][currentChunkCol].map
+                });
             }
 
             switch (operationStatus) {
@@ -604,7 +597,7 @@ class App extends React.Component<{}, gameState> {
                     this.setState(initialState);
 
                     // get data
-                    this.state.socket.send('map');
+                    this.state.socket.send('open 0 0');
                     break;
 
                 case 'map:':
@@ -616,21 +609,22 @@ class App extends React.Component<{}, gameState> {
                 case 'open: You lose':
                     this.setState({
                         title: 'You lose',
-                        playing: false,
                         lose: this.state.lose + 1,
                         winRate: ( this.state.win / (this.state.lose + 1) ) * 100,
                         chunks: {},
+                        playing: false
 
                     });
-                    this.state.socket.send('map');
+                    // this.state.socket.send('map');
+                    this.state.socket.send(`new ${this.state.level}`);
                     break;
 
                 case 'open: You win':
                     this.setState({
                         title: 'You Win',
-                        playing: false,
                         win: this.state.win + 1,
-                        winRate: ( (this.state.win + 1) / this.state.lose ) * 100
+                        winRate: ( (this.state.win + 1) / this.state.lose ) * 100,
+                        playing: false
                     });
 
                     console.log(e);
@@ -640,8 +634,7 @@ class App extends React.Component<{}, gameState> {
                     break;
 
                 case 'open: OK':
-                    this.setState({playing: true});
-                    this.state.socket.send('map',);
+                    this.state.socket.send('map');
                     break;
 
                 default:
@@ -665,15 +658,15 @@ class App extends React.Component<{}, gameState> {
 
                 <div className={`app__map map ${hintsVisibility}`}>
                     <h2>{this.state.title}: {}</h2>
-                    <ul className='map__list'>
-                        {(this.state.map !== undefined) ?
+                        { (this.state.map !== undefined) ?
                             <Map chunks={this.state.chunks}
                                  map={this.state.map}
                                  mines={this.state.mines}
                                  safe={this.state.safe}
                                  socket={this.state.socket}
+                                 xChunkNumber={this.state.xChunkNumber}
+                                 yChunkNumber={this.state.yChunkNumber}
                             /> : ''}
-                    </ul>
                 </div>
             </div>
         );

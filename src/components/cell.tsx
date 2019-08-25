@@ -1,6 +1,6 @@
 import React, {MouseEvent} from 'react';
 
-import { decimalAdjust } from './../helper';
+import { round } from './../helper';
 
 export interface cellState {
     highlited: boolean
@@ -79,7 +79,7 @@ class Cell extends React.Component<cellProps, cellState> {
             counter = this.props.suspiciousnessLevel.counter;
             suspiciousnessLevel = this.props.suspiciousnessLevel.value;
 
-            hint = (item === '□') ? `${ decimalAdjust('round', suspiciousnessLevel * 100, -2 )}% \n(${counter})` : '';
+            hint = (item === '□') ? `${ round(suspiciousnessLevel * 100, -2 )}% \n(${counter})` : '';
 
         } else {
             hint = ''

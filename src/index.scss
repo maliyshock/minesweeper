@@ -30,6 +30,11 @@ button {
   cursor: pointer;
 }
 
+ul {
+  padding: 0;
+  margin: 0;
+}
+
 .app {
   &__buttons {
     text-align: center;
@@ -86,7 +91,9 @@ button {
   }
 
   &__list {
-    display: inline-block;
+    display: block;
+    width: 100%;
+    //display: inline-block;
   }
 
   &__list, &__inner-row {
@@ -95,14 +102,30 @@ button {
     padding: 0;
   }
 
+  &__row, .chunk__row {
+    display: flex;
+  }
+
   &__row {
-    &:nth-child(10n):not(:last-child) {
-      border-bottom: 1px solid darken($gray, 30%);
+    & + & {
+      border-top: 1px solid darken($gray, 50%);
     }
   }
 
   &__inner-row {
     display: flex;
+  }
+
+  &__chunk {
+    opacity: 0.5;
+
+    &.active {
+      opacity: 1;
+    }
+
+    & + & {
+      border-left: 1px solid darken($gray, 50%);
+    }
   }
 
   &__cell {
