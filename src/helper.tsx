@@ -59,8 +59,6 @@ export function generateChunks(map: string[]):chunks {
             for (let col = 0; col < row.length; col = col + CHUNK_SIZE_X) {
                 // let chunkName = generateChunkName(mr, col);
                 let newPart = row.slice( col, col + CHUNK_SIZE_X );
-                // console.log(_.isEmpty(saveChunks[`c_${incrementator}`]));
-                // saveChunks[`c_${incrementator}`] = _.isEmpty( saveChunks[`c_${incrementator}`] ) ? saveChunks[`c_${incrementator}`].push(newPart) : saveChunks[`c_${incrementator}`].concat( newPart );
 
                 if( _.isEmpty( saveChunks[`row_${mr}`] ) ) {
                     saveChunks[`row_${mr}`] = {};
