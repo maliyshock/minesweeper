@@ -11,6 +11,10 @@ code {
     monospace;
 }
 
+.h2 {
+  font-size: 32px;
+}
+
 $sky:       #21a6ff;
 $orange:    #FDBA63;
 $blue:      #6FC3E0;
@@ -23,11 +27,8 @@ $black:     #333;
 $transition-time:  0.3s;
 
 button {
-  border: 1px solid $blue;
-  padding: 8px 16px;
-  margin: 0;
   box-shadow: none;
-  cursor: pointer;
+  border: none;
 }
 
 ul {
@@ -39,13 +40,27 @@ ul {
   &__buttons {
     text-align: center;
 
+    & > * {
+      margin-left: 5px;
+      margin-right: 5px;
+    }
+
     & + & {
       margin-top: 20px;
     }
   }
+
+  &__box {
+    margin-bottom: 20px;
+
+    text-align: center;
+  }
 }
 
 .button {
+  border: 1px solid $blue;
+  padding: 8px 16px;
+  cursor: pointer;
   &--color-blue {
     color: $sky;
   }
@@ -117,6 +132,9 @@ ul {
   }
 
   &__chunk {
+    margin-left: auto;
+    margin-right: auto;
+
     opacity: 0.5;
 
     &.active {
@@ -261,4 +279,38 @@ ul {
   background-color: transparentize($black, 0.2);
 
   pointer-events: none;
+}
+
+.chunk {
+  display: inline-block;
+}
+
+.difficulty {
+  &__title {
+    display: inline-block;
+    vertical-align: middle;
+
+    margin-right: 5px;
+  }
+
+  &__inner {
+    display: inline-block;
+    vertical-align: middle;
+
+    & * {
+      display: inline-block;
+      vertical-align: middle;
+
+      margin-right: 5px;
+
+      &:last-child {
+        margin-right: 0;
+      }
+    }
+  }
+}
+
+*:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

@@ -6,42 +6,7 @@ import update from 'immutability-helper';
 
 import { CHUNK_SIZE_X, CHUNK_SIZE_Y } from './constants';
 import { round, convertToAbsolute, generateChunks, hasNumber, parseData, removeProp, extractNumberFromString, getTheAbsoluteStuff } from './helper';
-import { chunks, chunk, neighbor } from './interfaces/interfaces';
-
-export interface gameState {
-    socket: WebSocket,
-    map: string[] | undefined,
-    rows: number | undefined,
-    cols: number | undefined,
-    cells: number | undefined,
-
-    xChunksAmount: number,
-    yChunksAmount: number,
-    xChunkNumber: number,
-    yChunkNumber: number,
-    currentXStartPoint: number,
-    currentYStartPoint: number,
-    endOfMapIsReached: boolean,
-
-    currentChunkIs: string[],
-    chunks: chunks,
-
-    playing: boolean,
-
-    decisionMade: boolean,
-
-    mines: { [key: string]: { x: number, y: number } },
-    safe: { [key: string]: { x: number, y: number } },
-
-    operationStatus: string | undefined,
-    hintsAreHidden: boolean,
-    title: string,
-
-    level: number,
-    lose: number,
-    win: number,
-    winRate: number | undefined
-};
+import { gameState, chunk, neighbor } from './interfaces/interfaces';
 
 let initialState = {
     socket: new WebSocket('wss://hometask.eg1236.com/game1/'),
@@ -73,7 +38,7 @@ let initialState = {
     hintsAreHidden: true,
     title: 'Lets Rock',
 
-    level: 3,
+    level: 2,
     lose: 0,
     win: 0,
     winRate: undefined
@@ -99,6 +64,18 @@ class App extends React.Component<{}, gameState> {
 
     helpButtonHandler(socket: WebSocket) {
         socket.send('help');
+    }
+
+    reduceDifficulty() {
+        this.setState( state => {
+            return (this.state.level > 1) ? { ...state, level: state.level - 1} : state;
+        })
+    }
+
+    riseUpDifficulty() {
+        this.setState( state => {
+            return (this.state.level < 4) ? {...state, level: state.level + 1} : state;
+        })
     }
 
     // loop through the list of neighbor coordinates and do callback function
@@ -647,27 +624,43 @@ class App extends React.Component<{}, gameState> {
     render() {
         let hintsVisibility = (this.state.hintsAreHidden) ? 'map--hints-are-visible' : '';
 
+        let levelRiseUpDisabled = (this.state.level === 4);
+        let levelReduceDisabled = this.state.level === 1;
+
         return (
             <div className='app'>
+                <div className="app__box">
+                    <div className="difficulty">
+                        <span className="h2 difficulty__title">Choose difficulty:</span>
+
+                        <span className="difficulty__inner">
+                            <button className="button arrow arrow--shape-up" disabled={levelReduceDisabled} onClick={() => this.reduceDifficulty()}>–</button>
+                            <span className="h2">{this.state.level}</span>
+                            <button className="button arrow arrow--shape-up" disabled={levelRiseUpDisabled} onClick={() => this.riseUpDifficulty()}>+</button>
+                        </span>
+                    </div>
+                </div>
+
                 <div className='app__buttons'>
                     <button className='button' onClick={() => this.helpButtonHandler(this.state.socket)}>Help</button>
-                </div>
-                <div className='app__buttons'>
+
                     <button className='button' onClick={() => this.startButtonHandler(this.state.socket)}>Start New Game</button>
                 </div>
 
-                <div className={`app__map map ${hintsVisibility}`}>
+                <div className="app__box">
                     <h2>{this.state.title}: {}</h2>
-                        { (this.state.map !== undefined) ?
-                            <Map chunks={this.state.chunks}
-                                 map={this.state.map}
-                                 mines={this.state.mines}
-                                 safe={this.state.safe}
-                                 socket={this.state.socket}
-                                 xChunkNumber={this.state.xChunkNumber}
-                                 yChunkNumber={this.state.yChunkNumber}
-                            /> : ''}
+                    { (this.state.map !== undefined) ?
+                        <Map chunks={this.state.chunks}
+                             map={this.state.map}
+                             mines={this.state.mines}
+                             safe={this.state.safe}
+                             socket={this.state.socket}
+                             xChunkNumber={this.state.xChunkNumber}
+                             yChunkNumber={this.state.yChunkNumber}
+                        /> : ''}
                 </div>
+
+                <div className={`app__map map ${hintsVisibility}`}></div>
             </div>
         );
     }
