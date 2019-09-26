@@ -459,7 +459,6 @@ class App extends React.Component<{}, gameState> {
             // each time as we got message we save the new data
             let {map, operationStatus, cols, rows} = parseData(e);
 
-            console.log(e.data);
             // update the state with new data
             this.setState({
                 map: map,
@@ -604,7 +603,6 @@ class App extends React.Component<{}, gameState> {
                         playing: false
                     });
 
-                    console.log(e);
                     break;
 
                 case 'open: Out of bounds':
@@ -642,8 +640,6 @@ class App extends React.Component<{}, gameState> {
                 </div>
 
                 <div className='app__buttons'>
-                    <button className='button' onClick={() => this.helpButtonHandler(this.state.socket)}>Help</button>
-
                     <button className='button' onClick={() => this.startButtonHandler(this.state.socket)}>Start New Game</button>
                 </div>
 
