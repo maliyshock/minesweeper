@@ -1,5 +1,6 @@
 ### Что это?
 Это тестовое задание от evolution gaming. Которое спустя месяц так и не посмотрели. 
+[Демка лежит тут](https://maliyshock.github.io/minesweeper/)
 
 Формулировка задачи: "Your task is to solve all levels of the game available at https://hometask.eg1236.com/game1/
 
